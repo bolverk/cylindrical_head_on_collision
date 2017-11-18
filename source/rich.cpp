@@ -35,6 +35,9 @@
 #include "source/newtonian/test_2d/multiple_diagnostics.hpp"
 #include "source/misc/vector_initialiser.hpp"
 #include "source/newtonian/test_2d/consecutive_snapshots.hpp"
+#include "source/newtonian/two_dimensional/source_terms/CenterGravity.hpp"
+#include "source/newtonian/two_dimensional/source_terms/cylindrical_complementary.hpp"
+#include "source/newtonian/two_dimensional/source_terms/SeveralSources.hpp"
 
 using namespace std;
 using namespace simulation2d;
@@ -114,18 +117,19 @@ namespace {
     vector<ComputationalCell> res(static_cast<size_t>(tess.GetPointNo()));
     for(size_t i=0;i<res.size();++i){
       res.at(i).density = min_density;
-      res.at(i).pressure = 1e-7;
+      res.at(i).pressure = 1e-10;
       res.at(i).velocity = Vector2D(0,0);
       const Vector2D& r = tess.GetMeshPoint(static_cast<int>(i));
-      if(abs(r-Vector2D(0,sep))<radius){
-	const double x = radius - abs(r-Vector2D(0,sep));
-	res.at(i).density = max(min_density,10*pow(x/radius,1.5));
+      if(abs(r-Vector2D(0,0.25*sep))<0.25*radius){
+	res.at(i).density = 1000;
 	res.at(i).velocity = Vector2D(0,-1);
       }
       if(abs(r-Vector2D(0,-sep))<radius){
 	const double x = radius - abs(r-Vector2D(0,-sep));
-	res.at(i).density = max(min_density,10*pow(x/radius,1.5));
-	res.at(i).velocity = Vector2D(0,1);
+	res.at(i).density = 1;
+	if (x>0.5*radius)
+	  res.at(i).density = 1000;
+	//res.at(i).velocity = Vector2D(0,1);
       }
     }
     return res;
@@ -136,27 +140,35 @@ namespace {
   public:
 
     SimData(void):
-      pg_(),
-      width_(2),
-      outer_(-width_,width_,width_,-width_),
+      pg_(Vector2D(0,0), Vector2D(0,1)),
+      width_(0.5),
+      outer_(1e-3,width_,width_,-width_),
 #ifdef RICH_MPI
 	  vproc_(process_positions(outer_),outer_),
 		init_points_(SquareMeshM(50,50,vproc_,outer_.getBoundary().first,outer_.getBoundary().second)),
 		tess_(vproc_,init_points_,outer_),
 #else
       init_points_(clip_grid
-		   (RightRectangle(Vector2D(-width_,-width_), Vector2D(width_, width_)),
+		   (RightRectangle(Vector2D(1e-3,-width_), Vector2D(width_, width_)),
 		    complete_grid(0.1,
 				  2*width_,
-				  0.005))),
+				  0.002))),
 		tess_(init_points_, outer_),
 #endif
       eos_(5./3.),
       bpm_(),
       point_motion_(bpm_,eos_),
+      //      point_motion_(),
       sb_(),
       rs_(),
-      force_(),
+      gravity_acc_(0,
+		   1e-3,
+		   Vector2D(0,0)),
+      gravity_force_(gravity_acc_),
+      geom_force_(pg_.getAxis()),
+      force_(VectorInitialiser<SourceTerm*>
+	     (&gravity_force_)
+	     (&geom_force_)()),
       tsf_(0.3),
       fc_(rs_),
       eu_(),
@@ -184,7 +196,7 @@ namespace {
     }
 
   private:
-    const SlabSymmetry pg_;
+    const CylindricalSymmetry pg_;
     const double width_;
     const SquareBox outer_;
 #ifdef RICH_MPI
@@ -197,14 +209,18 @@ namespace {
     //Eulerian point_motion_;
     //	Lagrangian point_motion_;
 #else
-    //Eulerian point_motion_;
+    //    Eulerian point_motion_;
     Lagrangian bpm_;
     RoundCells point_motion_;
     //Lagrangian point_motion_;
 #endif
     const StationaryBox sb_;
     const Hllc rs_;
-    ZeroForce force_;
+    //    ZeroForce force_;
+    CenterGravity gravity_acc_;
+    ConservativeForce gravity_force_;
+    CylindricalComplementary geom_force_;
+    SeveralSources force_;
     const SimpleCFL tsf_;
     const SimpleFluxCalculator fc_;
     const SimpleExtensiveUpdater eu_;
@@ -239,11 +255,12 @@ int main(void)
   SimData sim_data;
   hdsim& sim = sim_data.getSim();
 
-  const double tf = 5e-1;
+  //  const double tf = 5e-2;
+  const double tf = 1e-4;
   SafeTimeTermination term_cond(tf,1e6);
   MultipleDiagnostics diag
   (VectorInitialiser<DiagnosticFunction*>()
-   (new ConsecutiveSnapshots(new ConstantTimeInterval(tf/200),
+   (new ConsecutiveSnapshots(new ConstantTimeInterval(tf/100),
 			     new Rubric("output/snapshot_",".h5")))
    (new WriteTime("time.txt"))
    (new WriteCycle("cycle.txt"))());
