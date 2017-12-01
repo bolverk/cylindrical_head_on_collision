@@ -112,28 +112,109 @@ namespace {
   vector<ComputationalCell> calc_init_cond(const Tessellation& tess)
   {
     const double radius = 0.04;
-    const double sep = 1.01*radius;
+    const double sep = 0.99*radius;
     const double min_density = 1e-9;
     vector<ComputationalCell> res(static_cast<size_t>(tess.GetPointNo()));
     for(size_t i=0;i<res.size();++i){
       res.at(i).density = min_density;
-      res.at(i).pressure = 1e-10;
+      res.at(i).pressure = 1e-9;
       res.at(i).velocity = Vector2D(0,0);
       const Vector2D& r = tess.GetMeshPoint(static_cast<int>(i));
       if(abs(r-Vector2D(0,0.25*sep))<0.25*radius){
 	res.at(i).density = 1000;
 	res.at(i).velocity = Vector2D(0,-1);
+	res.at(i).pressure = 1e-9;
       }
       if(abs(r-Vector2D(0,-sep))<radius){
 	const double x = radius - abs(r-Vector2D(0,-sep));
 	res.at(i).density = 1;
-	if (x>0.5*radius)
+	if (x>0.5*radius){
 	  res.at(i).density = 1000;
-	//res.at(i).velocity = Vector2D(0,1);
+	}
+	res.at(i).pressure = 1e-9;
       }
     }
     return res;
   }
+
+  class SelectiveCenterGravity: public Acceleration
+  {
+  public:
+    SelectiveCenterGravity
+    (double M,
+     double Rmin,
+     const Vector2D& centre):
+      M_(M),
+      Rmin_(Rmin),
+      centre_(centre) {}
+
+    Vector2D operator()
+    (const Tessellation& tess,
+     const vector<ComputationalCell>& cells,
+     const vector<Extensive>& /*fluxes*/,
+     const double /*time*/,
+     const int point,
+     TracerStickerNames const& /*tracerstickernames*/) const
+    {
+      if(cells.at(static_cast<size_t>(point)).density<1e-8)
+	return Vector2D(0,0);
+      const Vector2D pos(tess.GetCellCM(point)-centre_);
+      const double r = abs(pos);
+      if(abs(pos-Vector2D(0,-0.04))<0.04)
+	return Vector2D(0,0);
+      return (-1)*pos*M_/(r*r*r+Rmin_*Rmin_*Rmin_);
+    }
+
+  private:
+    const double M_;
+    const double Rmin_;
+    const Vector2D centre_;
+  };
+
+  class PressureFloor: public CellUpdater
+  {
+  public:
+
+    PressureFloor(void) {}
+
+    vector<ComputationalCell> operator()
+      (const Tessellation& tess,
+       const PhysicalGeometry& /*pg*/,
+       const EquationOfState& eos,
+       vector<Extensive>& extensives,
+       const vector<ComputationalCell>& old,
+       const CacheData& cd,
+       TracerStickerNames const& tracerstickernames) const
+    {
+      size_t N = static_cast<size_t>(tess.GetPointNo());
+      vector<ComputationalCell> res(N, old[0]);
+      for(size_t i=0;i<N;++i){
+	Extensive& extensive = extensives[i];
+	const double volume = cd.volumes[i];
+	res[i].density = extensive.mass / volume;
+	if(res[i].density<0)
+	  throw UniversalError("Negative density");
+	res[i].velocity = extensive.momentum / extensive.mass;
+	const double energy = extensive.energy / extensive.mass - 
+	  0.5*ScalarProd(res[i].velocity, res[i].velocity);
+	try{
+	  if(energy>0)
+	    res[i].pressure = eos.de2p(res[i].density,
+				       energy,
+				       res[i].tracers,
+				       tracerstickernames.tracer_names);
+	  else
+	    res[i].pressure = 1e-9;
+	}
+	catch(UniversalError& eo){
+	  eo.AddEntry("cell density", res[i].density);
+	  eo.AddEntry("cell energy", energy);
+	  throw;
+	}
+      }	
+      return res;
+    }
+  };
 
   class SimData
   {
@@ -141,7 +222,7 @@ namespace {
 
     SimData(void):
       pg_(Vector2D(0,0), Vector2D(0,1)),
-      width_(0.5),
+      width_(0.1),
       outer_(1e-3,width_,width_,-width_),
 #ifdef RICH_MPI
 	  vproc_(process_positions(outer_),outer_),
@@ -150,20 +231,20 @@ namespace {
 #else
       init_points_(clip_grid
 		   (RightRectangle(Vector2D(1e-3,-width_), Vector2D(width_, width_)),
-		    complete_grid(0.1,
+		    complete_grid(0.15,
 				  2*width_,
-				  0.002))),
+				  0.001))),
 		tess_(init_points_, outer_),
 #endif
       eos_(5./3.),
-      bpm_(),
-      point_motion_(bpm_,eos_),
-      //      point_motion_(),
+      //      bpm_(),
+      //      point_motion_(bpm_,eos_),
+      point_motion_(),
       sb_(),
       rs_(),
       gravity_acc_(0,
-		   1e-3,
-		   Vector2D(0,0)),
+		   0.04,
+		   Vector2D(0,-0.04)),
       gravity_force_(gravity_acc_),
       geom_force_(pg_.getAxis()),
       force_(VectorInitialiser<SourceTerm*>
@@ -209,22 +290,24 @@ namespace {
     //Eulerian point_motion_;
     //	Lagrangian point_motion_;
 #else
-    //    Eulerian point_motion_;
-    Lagrangian bpm_;
-    RoundCells point_motion_;
+    Eulerian point_motion_;
+    //Lagrangian bpm_;
+    //RoundCells point_motion_;
     //Lagrangian point_motion_;
 #endif
     const StationaryBox sb_;
     const Hllc rs_;
     //    ZeroForce force_;
-    CenterGravity gravity_acc_;
+    //CenterGravity gravity_acc_;
+    SelectiveCenterGravity gravity_acc_;
     ConservativeForce gravity_force_;
     CylindricalComplementary geom_force_;
     SeveralSources force_;
     const SimpleCFL tsf_;
     const SimpleFluxCalculator fc_;
     const SimpleExtensiveUpdater eu_;
-    const SimpleCellUpdater cu_;
+    //    const SimpleCellUpdater cu_;
+    const PressureFloor cu_;
     hdsim sim_;
   };
 
@@ -255,8 +338,7 @@ int main(void)
   SimData sim_data;
   hdsim& sim = sim_data.getSim();
 
-  //  const double tf = 5e-2;
-  const double tf = 1e-4;
+  const double tf = 1e-1;
   SafeTimeTermination term_cond(tf,1e6);
   MultipleDiagnostics diag
   (VectorInitialiser<DiagnosticFunction*>()
