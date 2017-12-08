@@ -160,7 +160,7 @@ namespace {
 	return Vector2D(0,0);
       const Vector2D pos(tess.GetCellCM(point)-centre_);
       const double r = abs(pos);
-      if(abs(pos-Vector2D(0,-0.04))<0.04)
+      if(r<0.04)
 	return Vector2D(0,0);
       return (-1)*pos*M_/(r*r*r+Rmin_*Rmin_*Rmin_);
     }
@@ -222,7 +222,7 @@ namespace {
 
     SimData(void):
       pg_(Vector2D(0,0), Vector2D(0,1)),
-      width_(0.1),
+      width_(0.5),
       outer_(1e-3,width_,width_,-width_),
 #ifdef RICH_MPI
 	  vproc_(process_positions(outer_),outer_),
@@ -233,16 +233,16 @@ namespace {
 		   (RightRectangle(Vector2D(1e-3,-width_), Vector2D(width_, width_)),
 		    complete_grid(0.15,
 				  2*width_,
-				  0.001))),
+				  0.0005))),
 		tess_(init_points_, outer_),
 #endif
       eos_(5./3.),
-      //      bpm_(),
-      //      point_motion_(bpm_,eos_),
+      //bpm_(),
+      //point_motion_(bpm_,eos_),
       point_motion_(),
       sb_(),
       rs_(),
-      gravity_acc_(0,
+      gravity_acc_(1,
 		   0.04,
 		   Vector2D(0,-0.04)),
       gravity_force_(gravity_acc_),
@@ -291,8 +291,8 @@ namespace {
     //	Lagrangian point_motion_;
 #else
     Eulerian point_motion_;
-    //Lagrangian bpm_;
-    //RoundCells point_motion_;
+    //    Lagrangian bpm_;
+    //    RoundCells point_motion_;
     //Lagrangian point_motion_;
 #endif
     const StationaryBox sb_;
