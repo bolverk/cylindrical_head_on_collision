@@ -119,6 +119,7 @@ namespace {
       res.at(i).density = min_density;
       res.at(i).pressure = 1e-9;
       res.at(i).velocity = Vector2D(0,0);
+      res.at(i).tracers.push_back(0);
       const Vector2D& r = tess.GetMeshPoint(static_cast<int>(i));
       if(abs(r-Vector2D(0,0.25*sep))<0.25*radius){
 	res.at(i).density = 1000;
@@ -128,8 +129,10 @@ namespace {
       if(abs(r-Vector2D(0,-sep))<radius){
 	const double x = radius - abs(r-Vector2D(0,-sep));
 	res.at(i).density = 1;
+	res.at(i).tracers.at(0) = 1;
 	if (x>0.5*radius){
 	  res.at(i).density = 1000;
+	  res.at(i).tracers.at(0) = 0;
 	}
 	res.at(i).pressure = 1e-9;
       }
@@ -211,6 +214,8 @@ namespace {
 	  eo.AddEntry("cell energy", energy);
 	  throw;
 	}
+	for(size_t j=0;j<extensive.tracers.size();++j)
+	  res.at(i).tracers.at(j) = extensive.tracers.at(j)/extensive.mass;
       }	
       return res;
     }
@@ -225,16 +230,16 @@ namespace {
       width_(0.5),
       outer_(1e-3,width_,width_,-width_),
 #ifdef RICH_MPI
-	  vproc_(process_positions(outer_),outer_),
-		init_points_(SquareMeshM(50,50,vproc_,outer_.getBoundary().first,outer_.getBoundary().second)),
-		tess_(vproc_,init_points_,outer_),
+      vproc_(process_positions(outer_),outer_),
+      init_points_(SquareMeshM(50,50,vproc_,outer_.getBoundary().first,outer_.getBoundary().second)),
+      tess_(vproc_,init_points_,outer_),
 #else
       init_points_(clip_grid
 		   (RightRectangle(Vector2D(1e-3,-width_), Vector2D(width_, width_)),
 		    complete_grid(0.15,
 				  2*width_,
 				  0.0005))),
-		tess_(init_points_, outer_),
+      tess_(init_points_, outer_),
 #endif
       eos_(5./3.),
       //bpm_(),
@@ -256,9 +261,9 @@ namespace {
       cu_(),
       sim_(
 #ifdef RICH_MPI
-		  vproc_,
+	   vproc_,
 #endif
-		  tess_,
+	   tess_,
 	   outer_,
 	   pg_,
 	   calc_init_cond(tess_),
@@ -269,7 +274,9 @@ namespace {
 	   tsf_,
 	   fc_,
 	   eu_,
-	   cu_) {}
+	   cu_,
+	   TracerStickerNames(VectorInitialiser<string>("atmosphere")(),
+			      vector<string>())){}
 
     hdsim& getSim(void)
     {
