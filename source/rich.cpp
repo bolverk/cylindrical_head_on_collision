@@ -6,6 +6,7 @@
 #include <cmath>
 #include <vector>
 #include <string>
+#include <cmath>
 #include "source/tessellation/geometry.hpp"
 #include "source/newtonian/two_dimensional/hdsim2d.hpp"
 #include "source/tessellation/tessellation.hpp"
@@ -111,8 +112,6 @@ namespace {
 
   vector<ComputationalCell> calc_init_cond(const Tessellation& tess)
   {
-    const double radius = 0.04;
-    const double sep = 0.99*radius;
     const double min_density = 1e-9;
     vector<ComputationalCell> res(static_cast<size_t>(tess.GetPointNo()));
     for(size_t i=0;i<res.size();++i){
@@ -120,21 +119,27 @@ namespace {
       res.at(i).pressure = 1e-9;
       res.at(i).velocity = Vector2D(0,0);
       res.at(i).tracers.push_back(0);
+
       const Vector2D& r = tess.GetMeshPoint(static_cast<int>(i));
-      if(abs(r-Vector2D(0,0.25*sep))<0.25*radius){
-	res.at(i).density = 1000;
+
+      // Impactor
+      if(abs(r-Vector2D(0,1+0.5+0.25))<0.25){
+	res.at(i).density = 3.0/(4.0*M_PI);
 	res.at(i).velocity = Vector2D(0,-1);
 	res.at(i).pressure = 1e-9;
       }
-      if(abs(r-Vector2D(0,-sep))<radius){
-	const double x = radius - abs(r-Vector2D(0,-sep));
-	res.at(i).density = 1;
+
+      // Atmosphere
+      if(abs(r)<1.5){
+	res.at(i).density = 3.0/(4.0*M_PI)*1e-3;
 	res.at(i).tracers.at(0) = 1;
-	if (x>0.5*radius){
-	  res.at(i).density = 1000;
-	  res.at(i).tracers.at(0) = 0;
-	}
-	res.at(i).pressure = 1e-9;
+      }
+
+      // Core
+      if(abs(r)<1){
+	res.at(i).density = 3.0/(4.0*M_PI);
+	res.at(i).tracers.at(0) = 0;
+	res.at(i).pressure = 3.0/(8.0*M_PI)*(1-pow(abs(r),2));
       }
     }
     return res;
@@ -163,9 +168,9 @@ namespace {
 	return Vector2D(0,0);
       const Vector2D pos(tess.GetCellCM(point)-centre_);
       const double r = abs(pos);
-      if(r<0.04)
-	return Vector2D(0,0);
-      return (-1)*pos*M_/(r*r*r+Rmin_*Rmin_*Rmin_);
+      if(r<1)
+	return (-1)*pos*M_/pow(Rmin_,3);
+      return (-1)*pos*M_/pow(r,3);
     }
 
   private:
@@ -227,7 +232,7 @@ namespace {
 
     SimData(void):
       pg_(Vector2D(0,0), Vector2D(0,1)),
-      width_(0.5),
+      width_(10),
       outer_(1e-3,width_,width_,-width_),
 #ifdef RICH_MPI
       vproc_(process_positions(outer_),outer_),
@@ -236,9 +241,9 @@ namespace {
 #else
       init_points_(clip_grid
 		   (RightRectangle(Vector2D(1e-3,-width_), Vector2D(width_, width_)),
-		    complete_grid(0.15,
+		    complete_grid(2,
 				  2*width_,
-				  0.0005))),
+				  0.002))),
       tess_(init_points_, outer_),
 #endif
       eos_(5./3.),
@@ -248,8 +253,8 @@ namespace {
       sb_(),
       rs_(),
       gravity_acc_(1,
-		   0.04,
-		   Vector2D(0,-0.04)),
+		   1,
+		   Vector2D(0,0)),
       gravity_force_(gravity_acc_),
       geom_force_(pg_.getAxis()),
       force_(VectorInitialiser<SourceTerm*>
@@ -363,7 +368,7 @@ int main(void)
   SimData sim_data;
   hdsim& sim = sim_data.getSim();
 
-  const double tf = 1e-1;
+  const double tf = 0.5e1;
   SafeTimeTermination term_cond(tf,1e6);
   MultipleDiagnostics diag
   (VectorInitialiser<DiagnosticFunction*>()
