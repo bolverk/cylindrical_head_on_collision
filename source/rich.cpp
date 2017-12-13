@@ -333,6 +333,24 @@ namespace {
   private:
     const string fname_;
   };
+
+  class VolumeCalculator: public DiagnosticAppendix
+  {
+  public:
+
+    vector<double> operator()(const hdsim& sim) const
+    {
+      vector<double> res(sim.getAllCells().size(),0);
+      for(size_t i=0;i<res.size();++i)
+	res.at(i) = sim.getCellVolume(i);
+      return res;
+    }
+
+    string getName(void) const
+    {
+      return "volumes";
+    }    
+  };
 }
 
 int main(void)
@@ -350,10 +368,13 @@ int main(void)
   MultipleDiagnostics diag
   (VectorInitialiser<DiagnosticFunction*>()
    (new ConsecutiveSnapshots(new ConstantTimeInterval(tf/100),
-			     new Rubric("output/snapshot_",".h5")))
+			     new Rubric("output/snapshot_",".h5"),
+			     VectorInitialiser<DiagnosticAppendix*>(new VolumeCalculator())
+			     ()))
    (new WriteTime("time.txt"))
    (new WriteCycle("cycle.txt"))());
-  write_snapshot_to_hdf5(sim, "output/initial.h5");
+  write_snapshot_to_hdf5(sim, "output/initial.h5",
+			 VectorInitialiser<DiagnosticAppendix*>(new VolumeCalculator())());
   main_loop(sim,
 	    term_cond,
 	    &hdsim::TimeAdvance,
@@ -364,9 +385,9 @@ int main(void)
   write_snapshot_to_hdf5(sim, "process_"+int2str(rank)+"_final"+".h5");
   MPI_Finalize();
 #else
-  write_snapshot_to_hdf5(sim, "output/final.h5");
+  write_snapshot_to_hdf5(sim, "output/final.h5",
+			 VectorInitialiser<DiagnosticAppendix*>(new VolumeCalculator())());
 #endif
-
 
   return 0;
 }
